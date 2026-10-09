@@ -99,7 +99,7 @@ export async function processGeminiToNotion(dateStr, notify, { force = false } =
   await notify(msg);
 }
 
-/** Step 3: Fetch custom URL (PDF or Web Article) and process directly to Notion */
+/** Step 3: Fetch custom URL (PDF, Category Page, or Web Article) and process directly to Notion */
 export async function processUrlToNotion(targetUrl, notify, dateStr = undefined) {
   const d = parseDate(dateStr);
   const label = d.format('DD MMM YYYY');
@@ -109,6 +109,7 @@ export async function processUrlToNotion(targetUrl, notify, dateStr = undefined)
   const headers = {
     'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   };
 
   const res = await axios.get(targetUrl, {
@@ -144,29 +145,122 @@ export async function processUrlToNotion(targetUrl, notify, dateStr = undefined)
       await sleep(config.batchDelayMs);
     }
     await notify(`✅ *Notion Sync Complete*: ${label}\n📌 ${sectionCount} topics extracted from PDF URL\n🔗 ${url}`);
-
-  } else {
-    await notify(`📰 Detected Web Article URL. Parsing text & extracting exam notes…`);
-    const html = buf.toString('utf8');
-    const $ = cheerio.load(html);
-
-    // Clean up noise
-    $('script, style, nav, footer, iframe, header, form, noscript').remove();
-    const bodyText = ($('article').text() || $('main').text() || $('body').text()).replace(/\s+/g, ' ').trim();
-
-    if (!bodyText || bodyText.length < 50) {
-      throw new Error('Could not extract readable text from the provided web URL.');
-    }
-
-    const out = await analyseText(bodyText, label, targetUrl);
-    if (out.sections.length) {
-      await appendSections(pageId, out.sections);
-    }
-    await notify(`✅ *Notion Sync Complete*: ${label}\n📌 ${out.sections.length} topics extracted from Article URL\n🔗 ${url}`);
+    return;
   }
+
+  // HTML processing
+  const html = buf.toString('utf8');
+  const $ = cheerio.load(html);
+
+  // 1. Special handling for TNPSC Category Pages (tnpscthervupettagam.com)
+  if (targetUrl.includes('tnpscthervupettagam.com/downloads-category')) {
+    await notify(`🔍 Detected TNPSC Category Page. Finding latest monthly detail page…`);
+    const detailLinks = [];
+    $('a[href*="downloads-detail"]').each((_, el) => {
+      const href = $(el).attr('href');
+      if (href) detailLinks.push(new URL(href, targetUrl).href);
+    });
+
+    if (detailLinks.length > 0) {
+      const latestDetailUrl = detailLinks[0];
+      await notify(`🔗 Found monthly detail page: ${latestDetailUrl}`);
+      const dRes = await axios.get(latestDetailUrl, { headers });
+      const d$ = cheerio.load(dRes.data);
+      const pdfs = [];
+      d$('a[href$=".pdf"]').each((_, el) => {
+        const pdfHref = d$(el).attr('href');
+        const pdfText = d$(el).text().trim();
+        if (pdfHref) pdfs.push({ href: new URL(pdfHref, latestDetailUrl).href, text: pdfText });
+      });
+
+      const dayStr = String(parseInt(d.format('DD'), 10));
+      const dayMatch = pdfs.find(p => new RegExp(`\\b${dayStr}\\b`, 'i').test(p.text) && /english/i.test(p.text));
+      const engPdf = dayMatch || pdfs.find(p => /english/i.test(p.text)) || pdfs[0];
+
+      if (engPdf) {
+        await notify(`📄 Found Daily PDF: *${engPdf.text}*\n🔗 ${engPdf.href}`);
+        return processUrlToNotion(engPdf.href, notify, dateStr);
+      }
+    }
+  }
+
+  // 2. Check for Blog/News Category listing pages with sub-article links
+  const articleLinks = [];
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    const text = $(el).text().replace(/\s+/g, ' ').trim();
+    if (!href || href === '#' || href.startsWith('javascript:')) return;
+    try {
+      const absUrl = new URL(href, targetUrl).href;
+      const parsedTarget = new URL(targetUrl);
+      const parsedAbs = new URL(absUrl);
+
+      const isSameDomain = parsedAbs.hostname === parsedTarget.hostname;
+      const pathSegments = parsedAbs.pathname.split('/').filter(Boolean);
+
+      const isUtility = /register|login|signup|contact|privacy|terms|about|help|vle_teacher|author/i.test(absUrl);
+      const isArticleLink =
+        isSameDomain &&
+        pathSegments.length >= 1 &&
+        !isUtility &&
+        !absUrl.includes('/category/') &&
+        !absUrl.includes('/tag/') &&
+        !absUrl.includes('/page/') &&
+        text.length > 15;
+
+      if (isArticleLink && !articleLinks.includes(absUrl)) {
+        articleLinks.push(absUrl);
+      }
+    } catch {}
+  });
+
+  if (articleLinks.length > 0 && (targetUrl.includes('/category/') || articleLinks.length >= 3)) {
+    await notify(`📰 Detected Category/Listing Index with ${articleLinks.length} article links. Processing top 3 latest articles…`);
+    const topArticles = articleLinks.slice(0, 3);
+    let totalSections = 0;
+
+    for (const artUrl of topArticles) {
+      await notify(`📖 Fetching sub-article: ${artUrl}…`);
+      try {
+        const aRes = await axios.get(artUrl, { headers, timeout: 15000 });
+        const a$ = cheerio.load(aRes.data);
+        a$('script, style, nav, footer, iframe, header, form, noscript').remove();
+        const bodyText = (a$('article').text() || a$('main').text() || a$('body').text()).replace(/\s+/g, ' ').trim();
+
+        if (bodyText && bodyText.length >= 100) {
+          const out = await analyseText(bodyText, label, artUrl);
+          if (out.sections.length) {
+            await appendSections(pageId, out.sections);
+            totalSections += out.sections.length;
+          }
+        }
+      } catch (e) {
+        await notify(`❌ Failed sub-article (${artUrl}): ${e.message}`);
+      }
+      await sleep(1000);
+    }
+    await notify(`✅ *Notion Sync Complete*: ${label}\n📌 ${totalSections} total topics extracted across articles\n🔗 ${url}`);
+    return;
+  }
+
+  // 3. Single Web Article Page / Default
+  await notify(`📰 Parsing single web article page & extracting exam notes…`);
+  $('script, style, nav, footer, iframe, header, form, noscript').remove();
+  const bodyText = ($('article').text() || $('main').text() || $('body').text()).replace(/\s+/g, ' ').trim();
+
+  if (!bodyText || bodyText.length < 50) {
+    throw new Error('Could not extract readable text from the provided web URL.');
+  }
+
+  const out = await analyseText(bodyText, label, targetUrl);
+  if (out.sections.length) {
+    await appendSections(pageId, out.sections);
+  }
+  await notify(`✅ *Notion Sync Complete*: ${label}\n📌 ${out.sections.length} topics extracted from Article URL\n🔗 ${url}`);
 }
 
 /** Legacy / direct helper */
 export async function runPipeline(dateStr, notify, opts = {}) {
   await processGeminiToNotion(dateStr, notify, opts);
 }
+
