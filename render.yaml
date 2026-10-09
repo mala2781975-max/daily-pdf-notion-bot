@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: daily-pdf-notion-bot
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NOTION_API_KEY
+        sync: false
+      - key: NOTION_YEAR_PAGE_ID
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: TELEGRAM_ALLOWED_CHAT_IDS
+        sync: false
+      - key: TZ
+        value: Asia/Kolkata

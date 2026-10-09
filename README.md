@@ -45,6 +45,33 @@ All values are saved to `.env`. Restart once after setup.
 
 ---
 
+## 🚀 Deploy to Render (24/7 Hosting)
+
+You can host this bot on **[Render.com](https://render.com)** for free so it runs continuously 24/7.
+
+### Step-by-Step Render Setup:
+
+1. **Sign in to Render**: Go to [dashboard.render.com](https://dashboard.render.com) and log in with your GitHub account (`mala2781975-max`).
+2. **Create New Web Service**:
+   - Click **New +** → **Web Service** (or **Blueprint**).
+   - Connect your GitHub repository: `mala2781975-max/daily-pdf-notion-bot`.
+3. **Configure Settings**:
+   - **Environment**: `Node`
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - **Instance Type**: `Free`
+4. **Add Environment Variables** (under *Environment* tab):
+   - `TELEGRAM_BOT_TOKEN`: `<Your bot token from @BotFather>`
+   - `GEMINI_API_KEY`: `<Your Gemini API key>`
+   - `NOTION_API_KEY`: `<Your Notion secret starting with secret_ or ntn_>`
+   - `NOTION_YEAR_PAGE_ID`: `<Your Notion Page ID>`
+   - `GEMINI_MODEL`: `gemini-2.5-flash`
+   - `TELEGRAM_ALLOWED_CHAT_IDS`: `<Your Telegram Chat ID>`
+   - `TZ`: `Asia/Kolkata`
+5. **Click Deploy Web Service**: Render will build and launch your bot! It includes an HTTP health check on port `3000` to stay active and healthy.
+
+---
+
 ## 📌 Commands
 
 | Command | Description |

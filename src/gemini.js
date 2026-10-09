@@ -64,9 +64,9 @@ EXAM NOTE-MAKING RULES:
 `;
 
 const FALLBACK_MODELS = [
-  config.geminiModel,
+  config.geminiModel || 'gemini-2.5-flash',
   'gemini-2.5-flash',
-  'gemini-1.5-flash',
+  'gemini-2.0-flash',
 ];
 
 export async function analyseBatch(batch, dateLabel) {

@@ -5,6 +5,7 @@
  * Subsequent runs:      starts the full pipeline bot immediately.
  */
 
+import http from 'http';
 import TelegramBot from 'node-telegram-bot-api';
 import dayjs from 'dayjs';
 import 'dotenv/config';
@@ -602,6 +603,15 @@ if (needsSetup) {
   // Global safety net — prevents stale Telegram errors from crashing the process
   process.on('unhandledRejection', (reason) => {
     console.warn('⚠️ Unhandled rejection (bot kept running):', reason?.message || reason);
+  });
+
+  // HTTP server for cloud platforms (Render, Railway) health checks
+  const port = process.env.PORT || 3000;
+  http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('🤖 Daily PDF → Notion Bot is online and healthy!\n');
+  }).listen(port, () => {
+    console.log(`🌐 Health server listening on port ${port}`);
   });
 
   console.log(`✅ Bot started. Daily run: ${config.cron} (${config.tz})`);
