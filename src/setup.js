@@ -17,17 +17,15 @@ const ENV_PATH = path.resolve(__dirname, '..', '.env');
 
 /** Read existing .env into a key-value map (best effort). */
 async function readEnv() {
+  const map = { ...process.env };
   try {
     const raw = await fs.readFile(ENV_PATH, 'utf8');
-    const map = {};
     for (const line of raw.split('\n')) {
       const [k, ...rest] = line.split('=');
       if (k && !k.startsWith('#')) map[k.trim()] = rest.join('=').trim();
     }
-    return map;
-  } catch {
-    return {};
-  }
+  } catch {}
+  return map;
 }
 
 /** Write a key-value map back to .env, preserving existing structure. */

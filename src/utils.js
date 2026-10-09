@@ -40,7 +40,11 @@ export async function updateEnvKey(key, value) {
     newLines.push(`${key}=${value}`);
   }
 
-  await fs.writeFile(envPath, newLines.join('\n'), 'utf8');
+  try {
+    await fs.writeFile(envPath, newLines.join('\n'), 'utf8');
+  } catch (e) {
+    console.warn('Could not write .env file to disk (updated in process memory):', e.message);
+  }
   process.env[key] = value;
   
   // also update config object live
