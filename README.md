@@ -74,13 +74,15 @@ You can host this bot on **[Render.com](https://render.com)** for free so it run
 
 ## 📌 Commands
 
-| Command | Description |
-|---------|-------------|
+| Command / Action | Description |
+|------------------|-------------|
+| 📤 **Upload PDF Attachment** | Attach/send any PDF file directly into chat for instant AI extraction to Notion |
 | `/today` | Download & process today's PDF |
+| `/date` | Open interactive Date Picker (Year/Month/Day) |
+| `/url <link>` | Process custom PDF URL, web article, or news page directly |
 | `/process YYYY-MM-DD` | Process a specific date |
 | `/process YYYY-MM-DD force` | Re-process even if already saved |
-| `/status` | Show current configuration |
-| `/start` | Show help & your chat ID |
+| `/status` / `/start` | Show interactive dashboard & health status |
 
 ---
 

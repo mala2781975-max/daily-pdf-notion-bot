@@ -192,14 +192,55 @@ function richText(md) {
   return parts.length ? parts : [{ type: 'text', text: { content: ' ' } }];
 }
 
-function sectionsToBlocks(sections) {
+function formatDateForMetadata(d) {
+  if (!d) return '';
+  const day = d.format('D');
+  const month = d.format('MMM').toLowerCase();
+  const year = d.format('YYYY');
+  return `${day} - ${month} -${year}`;
+}
+
+function sectionsToBlocks(sections, meta = {}) {
   const blocks = [];
+  const sourceText = meta.source || 'www.tnpscthervupettagam.com';
+  const dateText = meta.date ? formatDateForMetadata(meta.date) : '';
+
   for (const s of sections) {
+    // 1. Heading 1
     blocks.push({
       object: 'block',
       type: 'heading_1',
       heading_1: { rich_text: [{ type: 'text', text: { content: s.heading.replaceAll('**', '').slice(0, 1900) } }] },
     });
+
+    // 2. Metadata subtitle: Source : ... Date : ...
+    let metaLine = `Source : ${sourceText}`;
+    if (dateText) {
+      metaLine += `  Date : ${dateText}`;
+    }
+
+    blocks.push({
+      object: 'block',
+      type: 'paragraph',
+      paragraph: {
+        rich_text: [
+          {
+            type: 'text',
+            text: { content: metaLine },
+            annotations: { color: 'gray' },
+          },
+        ],
+      },
+    });
+
+    // 3. Divider line
+    blocks.push({
+      object: 'block',
+      type: 'divider',
+      divider: {},
+    });
+
+    // 4. Bulleted List Items
     for (const p of s.points) {
       blocks.push({
         object: 'block',
@@ -211,10 +252,11 @@ function sectionsToBlocks(sections) {
   return blocks;
 }
 
-export async function appendSections(pageId, sections) {
-  const blocks = sectionsToBlocks(sections);
+export async function appendSections(pageId, sections, meta = {}) {
+  const blocks = sectionsToBlocks(sections, meta);
   for (let i = 0; i < blocks.length; i += 90) {
     await notion.blocks.children.append({ block_id: pageId, children: blocks.slice(i, i + 90) });
     await sleep(400); // stay under Notion's rate limit
   }
 }
+

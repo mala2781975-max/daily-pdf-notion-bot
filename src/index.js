@@ -8,6 +8,7 @@
 import http from 'http';
 import TelegramBot from 'node-telegram-bot-api';
 import dayjs from 'dayjs';
+import axios from 'axios';
 import 'dotenv/config';
 
 /* ──────────────────────────────────────────────────────────────
@@ -62,7 +63,7 @@ if (needsSetup) {
 
   const { config } = await import('./config.js');
   const { updateEnvKey, checkSystemHealth } = await import('./utils.js');
-  const { downloadAndPromptVerification, processGeminiToNotion, processUrlToNotion } = await import('./pipeline.js');
+  const { downloadAndPromptVerification, processGeminiToNotion, processUrlToNotion, processUploadedPdfToNotion } = await import('./pipeline.js');
   const { getMonitoredUrls, addMonitoredUrl, removeMonitoredUrl, processAllMonitoredUrls } = await import('./urlManager.js');
   const cron = (await import('node-cron')).default;
 
@@ -129,17 +130,19 @@ if (needsSetup) {
       `• 📓 *Notion API Key*: ${health.notionToken.msg}\n` +
       `• 📅 *Notion Integrated Page*: ${health.notionPage.msg}\n` +
       `• 🌐 *Monitored Web/PDF URLs*: *${savedUrls.length} saved*\n\n` +
-      `📌 *Daily PDF Commands*:\n` +
+      `📌 *Daily PDF Commands & Features*:\n` +
       `/today – Download today's PDF & prompt verification\n` +
       `/date – Open Interactive Date Picker (Year/Month/Day)\n` +
       `/url <link> – Process custom PDF or web article URL\n` +
-      `/process YYYY-MM-DD – Download specific date's PDF\n\n` +
+      `/process YYYY-MM-DD – Download specific date's PDF\n` +
+      `📤 *Upload PDF*: Attach/send any PDF file directly in chat!\n\n` +
       `👇 *Click any button below to manage PDFs, URLs, API Keys & Settings:*`;
 
     const keyboard = {
       inline_keyboard: [
         [
           { text: '📆 Pick Date & Download PDF', callback_data: 'menu_pick_date' },
+          { text: '📤 Upload PDF Info', callback_data: 'menu_upload_pdf' },
         ],
         [
           { text: '🌐 Add Monitored URL', callback_data: 'menu_add_url' },
@@ -280,6 +283,33 @@ if (needsSetup) {
     }
   }
 
+  /** User-uploaded PDF extraction to Notion */
+  async function triggerUploadedPdfProcess(fileId, filename, captionText, chatIds) {
+    if (running) {
+      return notifier(chatIds)('⏳ A job is already running. Please wait.');
+    }
+    running = true;
+    const notify = notifier(chatIds);
+    try {
+      await notify(`📥 Downloading uploaded PDF from Telegram…`);
+      const fileLink = await bot.getFileLink(fileId);
+      const res = await axios.get(fileLink, { responseType: 'arraybuffer', timeout: 60000 });
+      const buf = Buffer.from(res.data);
+
+      let dateStr;
+      if (captionText) {
+        const match = captionText.match(/\b(\d{4}-\d{2}-\d{2})\b/) || captionText.match(/\b(\d{2}[-/\.]\d{2}[-/\.]\d{4})\b/);
+        if (match) dateStr = match[1];
+      }
+
+      await processUploadedPdfToNotion(buf, filename, notify, dateStr);
+    } catch (e) {
+      await notify(`❌ Uploaded PDF processing failed: ${e.message}`);
+    } finally {
+      running = false;
+    }
+  }
+
   /* ---------- inline button callbacks ---------- */
 
   bot.on('callback_query', async (query) => {
@@ -316,6 +346,18 @@ if (needsSetup) {
     } else if (data === 'menu_pick_date') {
       await bot.answerCallbackQuery(query.id);
       sendYearPicker(chatId, query.message.message_id);
+
+    } else if (data === 'menu_upload_pdf') {
+      await bot.answerCallbackQuery(query.id);
+      await bot.sendMessage(
+        chatId,
+        `📤 *How to Upload & Extract any Current Affairs PDF*:\n\n` +
+        `1. Click the attachment 📎 icon in this chat.\n` +
+        `2. Select & send any PDF file (Current Affairs, news roundup, or study notes).\n` +
+        `3. *(Optional)* Add a date in the caption (e.g. \`2026-10-09\`) to save under a specific date in Notion.\n\n` +
+        `The bot will automatically download your PDF, process it with Gemini AI, and save high-yield exam notes directly to your Notion page! 🚀`,
+        { parse_mode: 'Markdown' }
+      );
 
     } else if (data.startsWith('pick_year:')) {
       const year = data.split(':')[1];
@@ -445,8 +487,28 @@ if (needsSetup) {
       return;
     }
 
+    // Check if user uploaded a PDF document
+    if (msg.document) {
+      const mime = (msg.document.mime_type || '').toLowerCase();
+      const fname = (msg.document.file_name || '').toLowerCase();
+      if (mime === 'application/pdf' || fname.endsWith('.pdf')) {
+        return triggerUploadedPdfProcess(
+          msg.document.file_id,
+          msg.document.file_name || 'Uploaded_Document.pdf',
+          msg.caption || '',
+          [chatId]
+        );
+      }
+    }
+
     const state = userStates.get(chatId);
-    if (!state) return;
+    if (!state) {
+      // Auto-process direct URL pastes
+      if (/^https?:\/\//i.test(text)) {
+        return triggerUrlProcess(text, [chatId]);
+      }
+      return;
+    }
 
     if (state === 'WAITING_FOR_GEMINI_KEY') {
       if (text.length < 10) {
@@ -497,11 +559,6 @@ if (needsSetup) {
       }
       await sendStartHealthDashboard(chatId);
       return;
-    }
-
-    // Auto-process direct URL pastes
-    if (!state && /^https?:\/\//i.test(text)) {
-      return triggerUrlProcess(text, [chatId]);
     }
   });
 

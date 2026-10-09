@@ -82,7 +82,7 @@ export async function processGeminiToNotion(dateStr, notify, { force = false } =
       const res = await analyseBatch(batch, label);
       unreadable.push(...res.unreadable);
       if (res.sections.length) {
-        await appendSections(pageId, res.sections);
+        await appendSections(pageId, res.sections, { source: 'www.tnpscthervupettagam.com', date: d });
         sectionCount += res.sections.length;
       }
     } catch (e) {
@@ -136,7 +136,8 @@ export async function processUrlToNotion(targetUrl, notify, dateStr = undefined)
       try {
         const out = await analyseBatch(batch, label);
         if (out.sections.length) {
-          await appendSections(pageId, out.sections);
+          const sourceName = targetUrl.includes('http') ? new URL(targetUrl).hostname : targetUrl;
+          await appendSections(pageId, out.sections, { source: sourceName, date: d });
           sectionCount += out.sections.length;
         }
       } catch (e) {
@@ -230,7 +231,8 @@ export async function processUrlToNotion(targetUrl, notify, dateStr = undefined)
         if (bodyText && bodyText.length >= 100) {
           const out = await analyseText(bodyText, label, artUrl);
           if (out.sections.length) {
-            await appendSections(pageId, out.sections);
+            const artSource = artUrl.includes('http') ? new URL(artUrl).hostname : artUrl;
+            await appendSections(pageId, out.sections, { source: artSource, date: d });
             totalSections += out.sections.length;
           }
         }
@@ -254,13 +256,79 @@ export async function processUrlToNotion(targetUrl, notify, dateStr = undefined)
 
   const out = await analyseText(bodyText, label, targetUrl);
   if (out.sections.length) {
-    await appendSections(pageId, out.sections);
+    const pageSource = targetUrl.includes('http') ? new URL(targetUrl).hostname : targetUrl;
+    await appendSections(pageId, out.sections, { source: pageSource, date: d });
   }
   await notify(`✅ *Notion Sync Complete*: ${label}\n📌 ${out.sections.length} topics extracted from Article URL\n🔗 ${url}`);
+}
+
+/** Step 4: Process user-uploaded PDF file directly to Notion */
+export async function processUploadedPdfToNotion(buf, filename, notify, dateStr = undefined) {
+  // Extract date from dateStr or filename if present
+  let targetDateStr = dateStr;
+  if (!targetDateStr && filename) {
+    const match = filename.match(/\b(\d{4}-\d{2}-\d{2})\b/) || filename.match(/\b(\d{2}[-_]\d{2}[-_]\d{4})\b/);
+    if (match) {
+      targetDateStr = match[1].replace(/_/g, '-');
+    }
+  }
+
+  const d = parseDate(targetDateStr);
+  const label = d.format('DD MMM YYYY');
+
+  // Save copy to downloads folder for record
+  const cleanName = (filename || 'uploaded.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const savePath = path.join('downloads', `uploaded_${Date.now()}_${cleanName}`);
+  try {
+    await fs.mkdir('downloads', { recursive: true });
+    await fs.writeFile(savePath, buf);
+  } catch (e) {
+    console.warn('Could not cache uploaded PDF to disk:', e.message);
+  }
+
+  const total = await getPageCount(buf);
+  const batchesTotal = Math.ceil(total / config.batchSize);
+
+  await notify(
+    `📄 *Uploaded PDF Received*: \`${filename || 'Document.pdf'}\`\n` +
+    `📊 *Details*: ${total} pages (${batchesTotal} batches)\n` +
+    `📅 *Target Notion Page Date*: *${label}*\n\n` +
+    `🚀 *Starting Gemini AI Extraction & Notion Sync…*`
+  );
+
+  const { pageId, url } = await getOrCreateDatePage(d);
+
+  const failed = [];
+  const unreadable = [];
+  let n = 0, sectionCount = 0;
+
+  for await (const batch of splitIntoBatches(buf, config.batchSize)) {
+    n++;
+    await notify(`📦 Processing Gemini Batch ${n}/${batchesTotal} (pages ${batch.from}-${batch.to})…`);
+    try {
+      const res = await analyseBatch(batch, label);
+      unreadable.push(...res.unreadable);
+      if (res.sections.length) {
+        await appendSections(pageId, res.sections, { source: filename || 'Uploaded PDF', date: d });
+        sectionCount += res.sections.length;
+      }
+    } catch (e) {
+      const reason = e.message?.split('\n')[0] || e.message;
+      failed.push(`${batch.from}-${batch.to} (${reason})`);
+      await notify(`❌ Batch ${batch.from}-${batch.to} failed: ${reason}`);
+    }
+    await sleep(config.batchDelayMs);
+  }
+
+  let msg = `✅ *Notion Sync Complete*: ${label}\n📄 *Uploaded File*: \`${filename}\`\n📌 ${sectionCount} topics saved to Notion\n🔗 ${url}`;
+  if (unreadable.length) msg += `\n⚠️ Unreadable pages: ${[...new Set(unreadable)].join(', ')}`;
+  if (failed.length) msg += `\n⚠️ Failed page ranges: ${failed.join(', ')}`;
+  await notify(msg);
 }
 
 /** Legacy / direct helper */
 export async function runPipeline(dateStr, notify, opts = {}) {
   await processGeminiToNotion(dateStr, notify, opts);
 }
+
 
