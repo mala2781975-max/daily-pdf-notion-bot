@@ -6,10 +6,14 @@
  */
 
 import http from 'http';
-import TelegramBot from 'node-telegram-bot-api';
 import dayjs from 'dayjs';
 import axios from 'axios';
 import 'dotenv/config';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const TelegramBot = require('node-telegram-bot-api');
+const cron = require('node-cron');
 
 /* ──────────────────────────────────────────────────────────────
    SETUP MODE – fires when .env is missing or incomplete
@@ -65,7 +69,6 @@ if (needsSetup) {
   const { updateEnvKey, checkSystemHealth } = await import('./utils.js');
   const { downloadAndPromptVerification, processGeminiToNotion, processUrlToNotion, processUploadedPdfToNotion } = await import('./pipeline.js');
   const { getMonitoredUrls, addMonitoredUrl, removeMonitoredUrl, processAllMonitoredUrls } = await import('./urlManager.js');
-  const cron = (await import('node-cron')).default;
 
   const bot        = new TelegramBot(config.telegramToken, { polling: true });
   const activeChatIds = new Set(config.allowedChatIds);
